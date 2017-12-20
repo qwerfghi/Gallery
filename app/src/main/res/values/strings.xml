@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">Gallery</string>
+
+    <string name="ad_mob_id">ca-app-pub-9273368323438575~5926347432</string>
+    <string name="ad_mob_banner">ca-app-pub-9273368323438575/9380708411</string>
+    <string name="ad_mob_interstitial">ca-app-pub-9273368323438575/5383475852</string>
+    <string name="delete_photo">Delete</string>
+    <string name="upload_photo">Upload</string>
+    <string name="sign_out">Sign Out</string>
+</resources>
