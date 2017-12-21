@@ -5,4 +5,8 @@
         android:id="@+id/sign_out"
         android:title="@string/sign_out"
         app:showAsAction="ifRoom" />
+
+    <item
+        android:id="@+id/change_source"
+        android:title="Change source" />
 </menu>

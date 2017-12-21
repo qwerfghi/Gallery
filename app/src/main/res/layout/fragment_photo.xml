@@ -4,11 +4,12 @@
         android:orientation="vertical">
 
         <ProgressBar
+            android:id="@+id/progress_bar"
             android:layout_width="40dp"
             android:layout_height="40dp"
             android:layout_centerInParent="true" />
 
-        <ImageView
+        <com.github.chrisbanes.photoview.PhotoView
             android:id="@+id/gallery_image"
             android:layout_width="match_parent"
             android:layout_height="match_parent"

@@ -5,15 +5,16 @@ import android.content.Intent;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
 import android.net.Uri;
+import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.v4.app.Fragment;
 import android.support.v4.app.FragmentManager;
 import android.support.v4.app.FragmentStatePagerAdapter;
 import android.support.v4.view.ViewPager;
 import android.support.v7.app.AppCompatActivity;
-import android.os.Bundle;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
+import android.support.v7.widget.Toolbar;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -23,13 +24,14 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.Toast;
 
-import com.google.firebase.auth.FirebaseAuth;
+import com.bumptech.glide.Glide;
+import com.firebase.ui.storage.images.FirebaseImageLoader;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.storage.FirebaseStorage;
+import com.google.firebase.storage.StorageReference;
 import com.google.firebase.storage.UploadTask;
-import com.squareup.picasso.Picasso;
 
 import java.io.File;
 import java.util.List;
@@ -37,16 +39,23 @@ import java.util.List;
 public class GalleryActivity extends AppCompatActivity {
     private ViewPager mPhotoPager;
     private RecyclerView mHorizontalImagesList;
-    private List<File> mPictureFiles;
+    private List<File> mLocalPictures;
+    private List<StorageReference> mStoragePictures;
     private int mCurrentPhotoIndex;
     private FirebaseStorage mStorage = FirebaseStorage.getInstance();
+    private FirebaseDatabase mDatabase = FirebaseDatabase.getInstance();
     private FirebaseUser mUser;
+    private Toolbar mToolbar;
+
+    private boolean mShouldUseLocal;
 
     private static final String CURRENT_PHOTO_INDEX = "current_photo_index";
+    private static final String SHOULD_USE_LOCAL = "should_use_local";
 
-    public static Intent newIntent(Context packageContext, int photoIndex) {
+    public static Intent newIntent(Context packageContext, int photoIndex, boolean shouldUseLocal) {
         Intent intent = new Intent(packageContext, GalleryActivity.class);
         intent.putExtra(CURRENT_PHOTO_INDEX, photoIndex);
+        intent.putExtra(SHOULD_USE_LOCAL, shouldUseLocal);
         return intent;
     }
 
@@ -54,21 +63,30 @@ public class GalleryActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_gallery);
-        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+        mCurrentPhotoIndex = getIntent().getIntExtra(CURRENT_PHOTO_INDEX, 0);
+        mShouldUseLocal = getIntent().getBooleanExtra(SHOULD_USE_LOCAL, true);
+        mToolbar = findViewById(R.id.toolbar);
+        setSupportActionBar(mToolbar);
+        getSupportActionBar().setDisplayShowHomeEnabled(true);
         getSupportActionBar().setHomeButtonEnabled(true);
         mUser = ((ApplicationContext) getApplication()).getUser();
-        mPictureFiles = ((ApplicationContext) getApplication()).getPhotoURLs();
+        mLocalPictures = ((ApplicationContext) getApplication()).getLocalPictures();
+        mStoragePictures = ((ApplicationContext) getApplication()).getStoragePictures();
         mPhotoPager = findViewById(R.id.photo_pager);
         FragmentManager fragmentManager = getSupportFragmentManager();
         mPhotoPager.setAdapter(new FragmentStatePagerAdapter(fragmentManager) {
             @Override
             public Fragment getItem(int position) {
-                return PhotoFragment.newInstance(position);
+                return PhotoFragment.newInstance(position, mShouldUseLocal);
             }
 
             @Override
             public int getCount() {
-                return mPictureFiles.size();
+                if (mShouldUseLocal) {
+                    return mLocalPictures.size();
+                } else {
+                    return mStoragePictures.size();
+                }
             }
 
             @Override
@@ -76,7 +94,6 @@ public class GalleryActivity extends AppCompatActivity {
                 return POSITION_NONE;
             }
         });
-        mCurrentPhotoIndex = getIntent().getIntExtra(CURRENT_PHOTO_INDEX, 0);
         mHorizontalImagesList = findViewById(R.id.images_horizontal_list);
         HorizontalListAdapter listAdapter = new HorizontalListAdapter();
         mHorizontalImagesList.setAdapter(listAdapter);
@@ -113,24 +130,38 @@ public class GalleryActivity extends AppCompatActivity {
     public boolean onOptionsItemSelected(MenuItem item) {
         switch (item.getItemId()) {
             case R.id.delete_photo:
-                File file = mPictureFiles.get(mCurrentPhotoIndex);
-                if (file.delete()) {
-                    Log.d("asd", "Успех");
+                if (mShouldUseLocal) {
+                    File file = mLocalPictures.get(mCurrentPhotoIndex);
+                    if (file.delete()) {
+                        Log.d("asd", "Успех");
+                    } else {
+                        Log.d("asd", "Ошибка");
+                    }
+                    mLocalPictures.remove(mCurrentPhotoIndex);
+                    if (mCurrentPhotoIndex == mLocalPictures.size()) {
+                        mCurrentPhotoIndex = mCurrentPhotoIndex - 1;
+                    }
                 } else {
-                    Log.d("asd", "Ошибка");
+                    StorageReference reference = mStoragePictures.get(mCurrentPhotoIndex);
+                    String reference2 = reference.getName().split("\\.")[0];
+                    mDatabase.getReference(mUser.getUid()).child(reference2).removeValue();
+                    mStorage.getReferenceFromUrl(mStoragePictures.get(mCurrentPhotoIndex).toString()).delete();
+
+                    mStoragePictures.remove(mCurrentPhotoIndex);
+                    if (mCurrentPhotoIndex == mStoragePictures.size()) {
+                        mCurrentPhotoIndex = mCurrentPhotoIndex - 1;
+                    }
                 }
-                mPictureFiles.remove(mCurrentPhotoIndex);
-                if (mCurrentPhotoIndex == mPictureFiles.size()) {
-                    mCurrentPhotoIndex = mCurrentPhotoIndex - 1;
-                }
+
                 mPhotoPager.getAdapter().notifyDataSetChanged();
                 mHorizontalImagesList.getAdapter().notifyDataSetChanged();
                 return true;
             case R.id.upload_photo:
-                File picture = mPictureFiles.get(mCurrentPhotoIndex);
+                File picture = mLocalPictures.get(mCurrentPhotoIndex);
                 FirebaseDatabase database = FirebaseDatabase.getInstance();
                 DatabaseReference myRef = database.getReference(mUser.getUid());
-                myRef.push().setValue(picture.getName());
+                String key = picture.getName().split("\\.")[0];
+                myRef.child(key).setValue(picture.getName());
                 UploadTask putFile = mStorage.getReference(mUser.getUid())
                         .child(picture.getName())
                         .putFile(Uri.fromFile(picture));
@@ -155,9 +186,17 @@ public class GalleryActivity extends AppCompatActivity {
 
         @Override
         public void onBindViewHolder(HorizontalImageViewHolder holder, int position) {
-            Picasso.with(GalleryActivity.this)
-                    .load(((ApplicationContext) getApplication()).getPhotoURLs().get(position))
-                    .into(holder.image);
+            if (mShouldUseLocal) {
+                Glide.with(GalleryActivity.this)
+                        .load(((ApplicationContext) getApplication()).getLocalPictures().get(position))
+                        .into(holder.image);
+            } else {
+                Glide.with(GalleryActivity.this)
+                        .using(new FirebaseImageLoader())
+                        .load(((ApplicationContext) getApplication()).getStoragePictures().get(position))
+                        .into(holder.image);
+            }
+
             ColorMatrix matrix = new ColorMatrix();
             if (selectedItem != position) {
                 matrix.setSaturation(0);
@@ -173,6 +212,7 @@ public class GalleryActivity extends AppCompatActivity {
                 holder.image.setAlpha(1f);
             }
 
+
             holder.image.setOnClickListener(view -> {
                 mCurrentPhotoIndex = position;
                 mPhotoPager.setCurrentItem(position, true);
@@ -181,7 +221,11 @@ public class GalleryActivity extends AppCompatActivity {
 
         @Override
         public int getItemCount() {
-            return ((ApplicationContext) getApplication()).getPhotoURLs().size();
+            if (mShouldUseLocal) {
+                return ((ApplicationContext) getApplication()).getLocalPictures().size();
+            } else {
+                return ((ApplicationContext) getApplication()).getStoragePictures().size();
+            }
         }
 
         public void setSelectedItem(int position) {
@@ -197,5 +241,9 @@ public class GalleryActivity extends AppCompatActivity {
             super(itemView);
             image = itemView.findViewById(R.id.image_horizontal);
         }
+    }
+
+    public Toolbar getToolbar() {
+        return mToolbar;
     }
 }
